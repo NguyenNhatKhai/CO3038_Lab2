@@ -1,3 +1,6 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 #include <Arduino.h>
 #include <ArduinoOTA.h>
 #include <Arduino_MQTT_Client.h>
@@ -5,6 +8,8 @@
 #include <HardwareSerial.h>
 #include <ThingsBoard.h>
 #include <WiFi.h>
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 constexpr char WIFI_SSID[] = "Harw";
 constexpr char WIFI_PASSWORD[] = "baohan1107";
@@ -17,8 +22,25 @@ constexpr uint32_t SERIAL_DEBUG_BAUD = 9600UL;
 
 WiFiClient wifiClient;
 Arduino_MQTT_Client mqttClient(wifiClient);
-ThingsBoard tb(mqttClient, MAX_MESSAGE_SIZE);
+ThingsBoard thingsboard(mqttClient, MAX_MESSAGE_SIZE);
 DHT20 dht20;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+volatile bool ledState = false;
+RPC_Response setLedState(const RPC_Data &data);
+void processSharedAttributes(const Shared_Attribute_Data &data);
+
+constexpr std::array<const char *, 1U> SHARED_ATTRIBUTES_LIST = {"ledState"};
+const std::array<RPC_Callback, 1U> callbacks = {
+  RPC_Callback{"setLedState", setLedState}
+};
+
+const Shared_Attribute_Callback attributes_callback(&processSharedAttributes, SHARED_ATTRIBUTES_LIST.cbegin(), SHARED_ATTRIBUTES_LIST.cend());
+const Attribute_Request_Callback attribute_shared_request_callback(&processSharedAttributes, SHARED_ATTRIBUTES_LIST.cbegin(), SHARED_ATTRIBUTES_LIST.cend());
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void InitWiFi() {
   Serial.print("Connecting to WiFi ...");
@@ -30,6 +52,47 @@ void InitWiFi() {
   Serial.println(); Serial.println("Connected to WiFi!");
 }
 
+void InitThingsBoard() {
+  Serial.print("Connecting to ThingsBoard ...");
+  thingsboard.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT);
+  while (!thingsboard.connected()) {
+    delay(500);
+    Serial.print(".");
+    thingsboard.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT);
+  }
+  if (!thingsboard.RPC_Subscribe(callbacks.cbegin(), callbacks.cend())) {
+    Serial.println("Failed to subscribe for RPC");
+  }
+  if (!thingsboard.Shared_Attributes_Subscribe(attributes_callback)) {
+    Serial.println("Failed to subscribe for shared attribute");
+  }
+  if (!thingsboard.Shared_Attributes_Request(attribute_shared_request_callback)) {
+    Serial.println("Failed to request for shared attributes");
+  }
+  Serial.println(); Serial.println("Connected to ThingsBoard!");
+}
+
+RPC_Response setLedState(const RPC_Data &data) {
+  Serial.println("Received LED state");
+  bool newState = data;
+  Serial.print("LED state is set to: "); Serial.println(newState);
+  digitalWrite(GPIO_NUM_2, newState);
+  return RPC_Response("setLedValue", newState);
+}
+
+void processSharedAttributes(const Shared_Attribute_Data &data) {
+  for (auto it = data.begin(); it != data.end(); ++it) {
+    if (strcmp(it->key().c_str(), "ledState") == 0) {
+      ledState = it->value().as<bool>();
+      digitalWrite(GPIO_NUM_2, ledState);
+      Serial.print("LED state is set to: "); Serial.println(ledState);
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 void TaskWiFi(void *pvParameters) {
   while(1) {
     if (WiFi.status() != WL_CONNECTED) {
@@ -40,42 +103,51 @@ void TaskWiFi(void *pvParameters) {
   }
 }
 
+void TaskThingsBoard(void *pvParameters) {
+  while(1) {
+    if (!thingsboard.connected()) {
+      Serial.println("ThingsBoard disconnected, attempting to reconnect ...");
+      InitThingsBoard();
+    }
+    vTaskDelay(5000);
+  }
+}
+
 void TaskDHT20(void *pvParameters) {
   while(1) {
     dht20.read();
+    double temperature = dht20.getTemperature();
+    double humidity = dht20.getHumidity();
+    Serial.print("Temperature: "); Serial.print(temperature); Serial.println(" *C");
+    Serial.print("Humidity: "); Serial.print(humidity); Serial.println(" %");
+    thingsboard.sendTelemetryData("temperature", temperature);
+    thingsboard.sendTelemetryData("humidity", humidity);
+    vTaskDelay(5000);
+  }
+}
+
+void TaskLED(void *pvParameters) {
+  while(1) {
+    thingsboard.sendAttributeData("ledState", digitalRead(GPIO_NUM_2));
     vTaskDelay(1000);
   }
 }
 
-void TaskTemperature(void *pvParameters) {
-  while(1) {
-    double temperature = dht20.getTemperature();
-    Serial.print("Temperature: "); Serial.print(temperature); Serial.println(" *C");
-    tb.sendTelemetryData("temperature", temperature);
-    vTaskDelay(3000);
-  }
-}
-
-void TaskHumidity(void *pvParameters) {
-  while(1) {
-    double humidity = dht20.getHumidity();
-    Serial.print("Humidity: "); Serial.print(humidity); Serial.println(" %");
-    tb.sendTelemetryData("humidity", humidity);
-    vTaskDelay(2000);
-  }
-}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
   Serial.begin(SERIAL_DEBUG_BAUD);
   Serial.println();
-  InitWiFi();
   Wire.begin(GPIO_NUM_21, GPIO_NUM_22);
   dht20.begin();
-  tb.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT);
   xTaskCreate(TaskWiFi, "WiFi", 2048, NULL, 2, NULL);
+  xTaskCreate(TaskThingsBoard, "ThingsBoard", 2048, NULL, 2, NULL);
   xTaskCreate(TaskDHT20, "DHT20", 2048, NULL, 2, NULL);
-  xTaskCreate(TaskTemperature, "Temperature", 2048, NULL, 2, NULL);
-  xTaskCreate(TaskHumidity, "Humidity", 2048, NULL, 2, NULL);
+  xTaskCreate(TaskLED, "LED", 2048, NULL, 2, NULL);
 }
 
 void loop() {}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
