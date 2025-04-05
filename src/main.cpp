@@ -11,9 +11,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-constexpr char WIFI_SSID[] = "Harw";
-constexpr char WIFI_PASSWORD[] = "baohan1107";
-constexpr char TOKEN[] = "5Ap61lYda1GENmE54hla";
+constexpr char WIFI_SSID[] = "KOPHiN COFFEE";
+constexpr char WIFI_PASSWORD[] = "kophincamon";
+constexpr char TOKEN[] = "DMeXarEe7JJzQKBEMwYC";
 constexpr char THINGSBOARD_SERVER[] = "app.coreiot.io";
 
 constexpr uint16_t THINGSBOARD_PORT = 1883U;
@@ -81,11 +81,11 @@ RPC_Response setLedState(const RPC_Data &data) {
 }
 
 void processSharedAttributes(const Shared_Attribute_Data &data) {
-  for (auto it = data.begin(); it != data.end(); ++it) {
+  for (auto it = data.begin(); it != data.end(); ++ it) {
     if (strcmp(it->key().c_str(), "ledState") == 0) {
       ledState = it->value().as<bool>();
       digitalWrite(GPIO_NUM_2, ledState);
-      Serial.print("LED state is set to: "); Serial.println(ledState);
+      Serial.print("LED state is updated to: "); Serial.println(ledState);
     }
   }
 }
@@ -128,7 +128,7 @@ void TaskDHT20(void *pvParameters) {
 
 void TaskLED(void *pvParameters) {
   while(1) {
-    thingsboard.sendAttributeData("ledState", digitalRead(GPIO_NUM_2));
+    thingsboard.loop();
     vTaskDelay(1000);
   }
 }
@@ -139,11 +139,14 @@ void TaskLED(void *pvParameters) {
 void setup() {
   Serial.begin(SERIAL_DEBUG_BAUD);
   Serial.println();
-  Wire.begin(GPIO_NUM_21, GPIO_NUM_22);
   dht20.begin();
+  Wire.begin(GPIO_NUM_21, GPIO_NUM_22);
+  pinMode(GPIO_NUM_2, OUTPUT);
+  InitWiFi();
+  InitThingsBoard();
   xTaskCreate(TaskWiFi, "WiFi", 2048, NULL, 2, NULL);
   xTaskCreate(TaskThingsBoard, "ThingsBoard", 2048, NULL, 2, NULL);
-  xTaskCreate(TaskDHT20, "DHT20", 2048, NULL, 2, NULL);
+  // xTaskCreate(TaskDHT20, "DHT20", 2048, NULL, 2, NULL);
   xTaskCreate(TaskLED, "LED", 2048, NULL, 2, NULL);
 }
 
