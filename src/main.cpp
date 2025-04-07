@@ -11,8 +11,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-constexpr char WIFI_SSID[] = "Harw";
-constexpr char WIFI_PASSWORD[] = "baohan1107";
+constexpr char WIFI_SSID[] = "Oreki";
+constexpr char WIFI_PASSWORD[] = "hardware";
 constexpr char TOKEN[] = "ynf3uNJE1tlUgkiz9tFQ";
 constexpr char THINGSBOARD_SERVER[] = "app.coreiot.io";
 
@@ -24,6 +24,16 @@ WiFiClient wifiClient;
 Arduino_MQTT_Client mqttClient(wifiClient);
 ThingsBoard thingsboard(mqttClient, MAX_MESSAGE_SIZE);
 DHT20 dht20;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+volatile bool ledState = false;
+void processSharedAttributes(const Shared_Attribute_Data &data);
+
+constexpr std::array<const char *, 1U> SHARED_ATTRIBUTES_LIST = {"ledState"};
+
+const Shared_Attribute_Callback attributes_callback(&processSharedAttributes, SHARED_ATTRIBUTES_LIST.cbegin(), SHARED_ATTRIBUTES_LIST.cend());
+const Attribute_Request_Callback attribute_shared_request_callback(&processSharedAttributes, SHARED_ATTRIBUTES_LIST.cbegin(), SHARED_ATTRIBUTES_LIST.cend());
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -46,7 +56,23 @@ void InitThingsBoard() {
     Serial.print(".");
     thingsboard.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT);
   }
+  if (!thingsboard.Shared_Attributes_Subscribe(attributes_callback)) {
+    Serial.println("Failed to subscribe for shared attribute");
+  }
+  if (!thingsboard.Shared_Attributes_Request(attribute_shared_request_callback)) {
+    Serial.println("Failed to request for shared attributes");
+  }
   Serial.println(); Serial.println("Connected to ThingsBoard!");
+}
+
+void processSharedAttributes(const Shared_Attribute_Data &data) {
+  for (auto it = data.begin(); it != data.end(); ++ it) {
+    if (strcmp(it->key().c_str(), "ledState") == 0) {
+      ledState = it->value().as<bool>();
+      digitalWrite(GPIO_NUM_2, ledState);
+      Serial.print("LED state is updated to: "); Serial.println(ledState);
+    }
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -85,6 +111,13 @@ void TaskDHT20(void *pvParameters) {
   }
 }
 
+void TaskLED(void *pvParameters) {
+  while(1) {
+    thingsboard.loop();
+    vTaskDelay(1000);
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -98,7 +131,7 @@ void setup() {
   InitThingsBoard();
   xTaskCreate(TaskWiFi, "WiFi", 2048, NULL, 2, NULL);
   xTaskCreate(TaskThingsBoard, "ThingsBoard", 2048, NULL, 2, NULL);
-  xTaskCreate(TaskDHT20, "DHT20", 2048, NULL, 2, NULL);
+  xTaskCreate(TaskLED, "LED", 2048, NULL, 2, NULL);
 }
 
 void loop() {}
