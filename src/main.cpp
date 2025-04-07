@@ -28,9 +28,13 @@ DHT20 dht20;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 volatile bool ledState = false;
+RPC_Response setLedState(const RPC_Data &data);
 void processSharedAttributes(const Shared_Attribute_Data &data);
 
 constexpr std::array<const char *, 1U> SHARED_ATTRIBUTES_LIST = {"ledState"};
+const std::array<RPC_Callback, 1U> callbacks = {
+  RPC_Callback{"setLedState", setLedState}
+};
 
 const Shared_Attribute_Callback attributes_callback(&processSharedAttributes, SHARED_ATTRIBUTES_LIST.cbegin(), SHARED_ATTRIBUTES_LIST.cend());
 const Attribute_Request_Callback attribute_shared_request_callback(&processSharedAttributes, SHARED_ATTRIBUTES_LIST.cbegin(), SHARED_ATTRIBUTES_LIST.cend());
@@ -56,6 +60,9 @@ void InitThingsBoard() {
     Serial.print(".");
     thingsboard.connect(THINGSBOARD_SERVER, TOKEN, THINGSBOARD_PORT);
   }
+  if (!thingsboard.RPC_Subscribe(callbacks.cbegin(), callbacks.cend())) {
+    Serial.println("Failed to subscribe for RPC");
+  }
   if (!thingsboard.Shared_Attributes_Subscribe(attributes_callback)) {
     Serial.println("Failed to subscribe for shared attribute");
   }
@@ -63,6 +70,14 @@ void InitThingsBoard() {
     Serial.println("Failed to request for shared attributes");
   }
   Serial.println(); Serial.println("Connected to ThingsBoard!");
+}
+
+RPC_Response setLedState(const RPC_Data &data) {
+  Serial.println("Received LED state");
+  bool newState = data;
+  Serial.print("LED state is set to: "); Serial.println(newState);
+  digitalWrite(GPIO_NUM_2, newState);
+  return RPC_Response("setLedValue", newState);
 }
 
 void processSharedAttributes(const Shared_Attribute_Data &data) {
